@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+# --- Terminal width (bash 3.2 compatible) ---
+TERM_W=$( { stty size </dev/tty; } 2>/dev/null | awk '{print $2}') || true
+: "${TERM_W:=${COLUMNS:-0}}"
+(( TERM_W < 40 )) && TERM_W=$(tput cols 2>/dev/null || echo 80)
+(( TERM_W < 40 )) && TERM_W=80
+
+# --- Catppuccin Mocha palette (printf for bash 3.2 compat) ---
+PEACH=$(printf '\033[38;2;250;179;135m')
+GREEN=$(printf '\033[38;2;166;227;161m')
+YELLOW=$(printf '\033[38;2;249;226;175m')
+SAPPHIRE=$(printf '\033[38;2;116;199;236m')
+LAVENDER=$(printf '\033[38;2;180;190;254m')
+MAUVE=$(printf '\033[38;2;203;166;247m')
+BLUE=$(printf '\033[38;2;137;180;250m')
+OVERLAY=$(printf '\033[38;2;127;132;156m')
+SURFACE=$(printf '\033[38;2;69;71;90m')
+RED=$(printf '\033[38;2;243;139;168m')
+BOLD=$(printf '\033[1m')
+RESET=$(printf '\033[0m')
+
+# --- Layout ---
+DIV_W=$(( TERM_W - 4 ))
+DIV="${SURFACE}$(printf '%*s' "$DIV_W" '' | tr ' ' '─')${RESET}"
+W=$(( DIV_W - 4 ))
+
+# --- Registry: add a domain by writing cat_<name>, adding it here, and a title arm ---
+CATEGORIES="api exit git curl"
+
+title_for() {
+    case "$1" in
+        api)  echo "HTTP status codes" ;;
+        exit) echo "Shell exit codes" ;;
+        git)  echo "Git errors" ;;
+        curl) echo "curl exit codes" ;;
+        *)    echo "" ;;
+    esac
+}
+
+color_for() {  # color name -> palette escape
+    case "$1" in
+        green)  printf '%s' "$GREEN" ;;
+        yellow) printf '%s' "$YELLOW" ;;
+        red)    printf '%s' "$RED" ;;
+        blue)   printf '%s' "$BLUE" ;;
+        peach)  printf '%s' "$PEACH" ;;
+        *)      printf '%s' "$OVERLAY" ;;
+    esac
+}
+
+# --- Render helpers (adapted from repoz) ---
+section_div() {  # label, color-escape
+    local label="$1" color="${2:-$MAUVE}"
+    local prefix="── ${label} "
+    local remain=$(( DIV_W - ${#prefix} ))
+    (( remain < 0 )) && remain=0
+    printf '  %s── %s%s %s%s%s\n' \
+        "$SURFACE" "$color" "$label" "$SURFACE" \
+        "$(printf '%*s' "$remain" '' | tr ' ' '─')" "$RESET"
+}
+
+print_row() {  # code, name, explanation, color-escape
+    local code="$1" name="$2" expl="$3" color="$4"
+    local left_len=$(( ${#code} + 2 + ${#name} ))
+    local pad=$(( W - left_len - ${#expl} ))
+    (( pad < 3 )) && pad=3
+    local dots; dots=$(printf '%*s' "$pad" '' | tr ' ' '·')
+    printf '    %s%s%s  %s%s%s %s%s%s %s%s%s\n' \
+        "$color" "$code" "$RESET" \
+        "$SAPPHIRE" "$name" "$RESET" \
+        "$SURFACE" "$dots" "$RESET" \
+        "$OVERLAY" "$expl" "$RESET"
+}
+
+# --- Domain data: "group:color|code|name|explanation" ---
+cat_api() {
+    cat <<'EOF'
+2xx Success:green|200|OK|Request succeeded
+2xx Success:green|201|Created|New resource created
+2xx Success:green|202|Accepted|Request queued, not yet processed
+2xx Success:green|204|No Content|Success, no body returned
+3xx Redirect:blue|301|Moved Permanently|Resource moved to a new URL
+3xx Redirect:blue|302|Found|Temporary redirect
+3xx Redirect:blue|304|Not Modified|Cached copy is still valid
+3xx Redirect:blue|307|Temporary Redirect|Repeat request to new URL, same method
+3xx Redirect:blue|308|Permanent Redirect|Resource moved, same method
+4xx Client:yellow|400|Bad Request|Malformed syntax or invalid input
+4xx Client:yellow|401|Unauthorized|Authentication required or failed
+4xx Client:yellow|402|Payment Required|Reserved, used by paid tiers
+4xx Client:yellow|403|Forbidden|Authenticated but not allowed
+4xx Client:yellow|404|Not Found|Resource does not exist
+4xx Client:yellow|405|Method Not Allowed|HTTP method not supported here
+4xx Client:yellow|409|Conflict|Request conflicts with current state
+4xx Client:yellow|422|Unprocessable Entity|Valid syntax, semantic errors
+4xx Client:yellow|429|Too Many Requests|Rate limit exceeded
+5xx Server:red|500|Internal Server Error|Generic server-side fault
+5xx Server:red|502|Bad Gateway|Invalid response from upstream
+5xx Server:red|503|Service Unavailable|Server overloaded or down
+5xx Server:red|504|Gateway Timeout|Upstream did not respond in time
+EOF
+}
+cat_exit() { : ; }   # stub - fill later
+cat_git()  { : ; }   # stub - fill later
+cat_curl() { : ; }   # stub - fill later
+
+# --- Renderer ---
+render_category() {  # category name
+    local cat="$1"
+    local title; title="$(title_for "$cat")"
+    local data; data="$("cat_${cat}")"
+    echo ""
+    printf '  %s%serrorz%s %s- %s%s\n' "$LAVENDER" "$BOLD" "$RESET" "$OVERLAY" "$title" "$RESET"
+    echo "  ${DIV}"
+    if [ -z "$data" ]; then
+        echo ""
+        echo "  ${OVERLAY}No entries yet for this category.${RESET}"
+        echo ""
+        return 0
+    fi
+    local last_group=""
+    printf '%s\n' "$data" | while IFS='|' read -r group code name expl; do
+        [ -z "$group" ] && continue
+        local gname="${group%%:*}"
+        local gcolor="${group#*:}"
+        [ "$gcolor" = "$group" ] && gcolor=""
+        if [ "$gname" != "$last_group" ]; then
+            echo ""
+            section_div "$gname" "$(color_for "$gcolor")"
+            last_group="$gname"
+        fi
+        print_row "$code" "$name" "$expl" "$(color_for "$gcolor")"
+    done
+    echo ""
+}
+
+lookup_code() {  # code
+    local query="$1" found=0 cat
+    echo ""
+    printf '  %s%serrorz%s %s- code %s%s\n' "$LAVENDER" "$BOLD" "$RESET" "$OVERLAY" "$query" "$RESET"
+    echo "  ${DIV}"
+    echo ""
+    for cat in $CATEGORIES; do
+        printf '%s\n' "$("cat_${cat}")" | while IFS='|' read -r group code name expl; do
+            [ -z "$group" ] && continue
+            [ "$code" = "$query" ] || continue
+            local gcolor="${group#*:}"
+            [ "$gcolor" = "$group" ] && gcolor=""
+            printf '    %s%-5s%s %s[%s]%s %s%s%s %s%s%s\n' \
+                "$(color_for "$gcolor")" "$code" "$RESET" \
+                "$MAUVE" "$cat" "$RESET" \
+                "$SAPPHIRE" "$name" "$RESET" \
+                "$OVERLAY" "$expl" "$RESET"
+        done
+        if printf '%s\n' "$("cat_${cat}")" | grep -q "|${query}|"; then
+            found=1
+        fi
+    done
+    echo ""
+    if [ "$found" -eq 1 ]; then
+        return 0
+    fi
+    echo "  ${OVERLAY}No match for code ${query}${RESET}"
+    echo ""
+    return 1
+}
+
+usage() {
+    cat <<EOF
+
+  ${LAVENDER}${BOLD}errorz${RESET} ${OVERLAY}- error code reference${RESET}
+  ${DIV}
+
+  Usage: errorz [--<category>] [code]
+
+  Categories:
+    --api     HTTP status codes
+    --exit    Shell exit codes (coming soon)
+    --git     Git errors (coming soon)
+    --curl    curl exit codes (coming soon)
+
+  Look up a single code across all categories:
+    errorz 404
+
+  Options:
+    -h, --help   Show this help
+
+EOF
+}
+
+# --- Dispatch ---
+[ $# -eq 0 ] && { usage; exit 0; }
+
+case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --api)  render_category api;  exit 0 ;;
+    --exit) render_category exit; exit 0 ;;
+    --git)  render_category git;  exit 0 ;;
+    --curl) render_category curl; exit 0 ;;
+    [0-9]*) if lookup_code "$1"; then exit 0; else exit 1; fi ;;
+    *) echo "Unknown: $1"; usage; exit 1 ;;
+esac
