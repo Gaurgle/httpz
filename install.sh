@@ -4,10 +4,10 @@ set -eo pipefail
 INSTALL_DIR="${1:-$HOME/.local/bin}"
 
 mkdir -p "$INSTALL_DIR"
-cp errorz "$INSTALL_DIR/errorz"
-chmod +x "$INSTALL_DIR/errorz"
+cp httpz "$INSTALL_DIR/httpz"
+chmod +x "$INSTALL_DIR/httpz"
 
-echo "Installed errorz to $INSTALL_DIR/errorz"
+echo "Installed httpz to $INSTALL_DIR/httpz"
 
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
     echo ""

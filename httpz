@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+# httpz - terminal HTTP status code reference.
+# Prints the relevant HTTP status codes, grouped and colored, then exits.
+
+# --- Terminal width (bash 3.2 compatible) ---
+TERM_W=$( { stty size </dev/tty; } 2>/dev/null | awk '{print $2}') || true
+: "${TERM_W:=${COLUMNS:-0}}"
+(( TERM_W < 40 )) && TERM_W=$(tput cols 2>/dev/null || echo 80)
+(( TERM_W < 40 )) && TERM_W=80
+
+# --- Catppuccin Mocha palette (printf for bash 3.2 compat) ---
+GREEN=$(printf '\033[38;2;166;227;161m')
+YELLOW=$(printf '\033[38;2;249;226;175m')
+BLUE=$(printf '\033[38;2;137;180;250m')
+RED=$(printf '\033[38;2;243;139;168m')
+SAPPHIRE=$(printf '\033[38;2;116;199;236m')
+LAVENDER=$(printf '\033[38;2;180;190;254m')
+OVERLAY=$(printf '\033[38;2;127;132;156m')
+SURFACE=$(printf '\033[38;2;69;71;90m')
+BOLD=$(printf '\033[1m')
+RESET=$(printf '\033[0m')
+
+# --- Layout ---
+DIV_W=$(( TERM_W - 4 ))
+DIV="${SURFACE}$(printf '%*s' "$DIV_W" '' | tr ' ' '─')${RESET}"
+W=$(( DIV_W - 4 ))
+
+color_for() {  # color name -> palette escape
+    case "$1" in
+        green)  printf '%s' "$GREEN" ;;
+        yellow) printf '%s' "$YELLOW" ;;
+        blue)   printf '%s' "$BLUE" ;;
+        red)    printf '%s' "$RED" ;;
+        *)      printf '%s' "$OVERLAY" ;;
+    esac
+}
+
+section_div() {  # label, color-escape
+    local label="$1" color="${2:-$SURFACE}"
+    local prefix="── ${label} "
+    local remain=$(( DIV_W - ${#prefix} ))
+    (( remain < 0 )) && remain=0
+    printf '  %s── %s%s %s%s%s\n' \
+        "$SURFACE" "$color" "$label" "$SURFACE" \
+        "$(printf '%*s' "$remain" '' | tr ' ' '─')" "$RESET"
+}
+
+print_row() {  # code, name, explanation, color-escape
+    local code="$1" name="$2" expl="$3" color="$4"
+    local left_len=$(( ${#code} + 2 + ${#name} ))
+    local pad=$(( W - left_len - ${#expl} ))
+    (( pad < 3 )) && pad=3
+    local dots; dots=$(printf '%*s' "$pad" '' | tr ' ' '·')
+    printf '    %s%s%s  %s%s%s %s%s%s %s%s%s\n' \
+        "$color" "$code" "$RESET" \
+        "$SAPPHIRE" "$name" "$RESET" \
+        "$SURFACE" "$dots" "$RESET" \
+        "$OVERLAY" "$expl" "$RESET"
+}
+
+# --- Data: group|color|code|name|explanation ---
+http_codes() {
+    cat <<'EOF'
+2xx Success|green|200|OK|Request succeeded
+2xx Success|green|201|Created|New resource created
+2xx Success|green|202|Accepted|Request queued, not yet processed
+2xx Success|green|204|No Content|Success, no body returned
+2xx Success|green|206|Partial Content|Range request succeeded
+3xx Redirect|blue|301|Moved Permanently|Resource moved to a new URL
+3xx Redirect|blue|302|Found|Temporary redirect
+3xx Redirect|blue|303|See Other|Redirect, fetch result with GET
+3xx Redirect|blue|304|Not Modified|Cached copy is still valid
+3xx Redirect|blue|307|Temporary Redirect|Repeat request to new URL, same method
+3xx Redirect|blue|308|Permanent Redirect|Resource moved, same method
+4xx Client|yellow|400|Bad Request|Malformed syntax or invalid input
+4xx Client|yellow|401|Unauthorized|Authentication required or failed
+4xx Client|yellow|402|Payment Required|Reserved, used by paid tiers
+4xx Client|yellow|403|Forbidden|Authenticated but not allowed
+4xx Client|yellow|404|Not Found|Resource does not exist
+4xx Client|yellow|405|Method Not Allowed|HTTP method not supported here
+4xx Client|yellow|406|Not Acceptable|Cannot satisfy Accept headers
+4xx Client|yellow|407|Proxy Authentication Required|Auth needed for the proxy
+4xx Client|yellow|408|Request Timeout|Client took too long to send
+4xx Client|yellow|409|Conflict|Request conflicts with current state
+4xx Client|yellow|410|Gone|Resource permanently removed
+4xx Client|yellow|411|Length Required|Content-Length header missing
+4xx Client|yellow|412|Precondition Failed|A request precondition was false
+4xx Client|yellow|413|Content Too Large|Request body exceeds limits
+4xx Client|yellow|414|URI Too Long|Request URI exceeds limits
+4xx Client|yellow|415|Unsupported Media Type|Body format not supported
+4xx Client|yellow|418|I'm a teapot|Joke code (RFC 2324), not real
+4xx Client|yellow|422|Unprocessable Entity|Valid syntax, semantic errors
+4xx Client|yellow|429|Too Many Requests|Rate limit exceeded
+4xx Client|yellow|451|Unavailable For Legal Reasons|Blocked for legal reasons
+5xx Server|red|500|Internal Server Error|Generic server-side fault
+5xx Server|red|501|Not Implemented|Method not supported by server
+5xx Server|red|502|Bad Gateway|Invalid response from upstream
+5xx Server|red|503|Service Unavailable|Server overloaded or down
+5xx Server|red|504|Gateway Timeout|Upstream did not respond in time
+5xx Server|red|505|HTTP Version Not Supported|HTTP version not supported
+5xx Server|red|511|Network Authentication Required|Auth needed (captive portal)
+EOF
+}
+
+render() {
+    echo ""
+    printf '  %s%shttpz%s %s- HTTP status codes%s\n' "$LAVENDER" "$BOLD" "$RESET" "$OVERLAY" "$RESET"
+    echo "  ${DIV}"
+    local last_group=""
+    http_codes | while IFS='|' read -r group color code name expl; do
+        [ -z "$group" ] && continue
+        if [ "$group" != "$last_group" ]; then
+            echo ""
+            section_div "$group" "$(color_for "$color")"
+            last_group="$group"
+        fi
+        print_row "$code" "$name" "$expl" "$(color_for "$color")"
+    done
+    echo ""
+}
+
+usage() {
+    cat <<EOF
+httpz - terminal HTTP status code reference
+
+Usage:
+  httpz        Print all HTTP status codes, grouped and colored.
+  httpz -h     Show this help.
+EOF
+}
+
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+    "")        render; exit 0 ;;
+    *) echo "httpz takes no arguments. Run 'httpz' for the list, or 'httpz -h'." >&2; exit 1 ;;
+esac
